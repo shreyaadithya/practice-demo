@@ -1,0 +1,85 @@
+pipeline {
+  agent any
+
+  environment {
+    DEPLOY_BASE = "${env.WORKSPACE}/deployments"
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+        echo "Checked out ${env.GIT_COMMIT}"
+      }
+    }
+
+    stage('Build -> Dev deploy') {
+      steps {
+        sh 'scripts/build.sh'
+        sh '''
+          DEV_DIR="${DEPLOY_BASE}/dev/${BUILD_NUMBER}"
+          mkdir -p "$DEV_DIR"
+          cp dist/*.tar.gz "$DEV_DIR"/
+          echo "Deployed to DEV: $DEV_DIR"
+        '''
+      }
+      post {
+        success {
+          archiveArtifacts artifacts: 'dist/**', fingerprint: true
+        }
+      }
+    }
+
+    stage('Test') {
+      steps {
+        sh 'scripts/unit_test.sh'
+      }
+    }
+
+    stage('Preprod deploy') {
+      steps {
+        sh '''
+          PRE_DIR="${DEPLOY_BASE}/preprod/${BUILD_NUMBER}"
+          mkdir -p "$PRE_DIR"
+          cp dist/*.tar.gz "$PRE_DIR"/
+          echo "Deployed to PREPROD: $PRE_DIR"
+        '''
+      }
+    }
+
+    stage('Approval before PROD') {
+      steps {
+        script {
+          // manual approval - waits for a user to click "Proceed"
+          def userInput = input message: "Approve deployment to PROD?", ok: "Proceed", parameters: []
+          echo "Approval received: ${userInput}"
+        }
+      }
+    }
+
+    stage('Prod deploy') {
+      steps {
+        sh '''
+          PROD_DIR="${DEPLOY_BASE}/prod/${BUILD_NUMBER}"
+          mkdir -p "$PROD_DIR"
+          cp dist/*.tar.gz "$PROD_DIR"/
+          echo "Deployed to PROD: $PROD_DIR"
+        '''
+      }
+      post {
+        success {
+          echo "Production deploy successful"
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      echo "Pipeline finished. See console output and archived artifacts."
+    }
+    failure {
+      echo "Pipeline failed."
+    }
+  }
+}
